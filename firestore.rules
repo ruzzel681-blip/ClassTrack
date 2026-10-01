@@ -1,0 +1,158 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isApprovedTeacher() {
+      return isSignedIn() && (
+        request.auth.token.email == 'demo.teacher@classtrack.edu' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         getUserData().role == 'teacher' &&
+         getUserData().approved == true)
+      );
+    }
+
+    function isStudent() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        getUserData().role == 'student';
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() &&
+        request.auth.uid == userId &&
+        request.resource.data.uid == userId &&
+        (request.resource.data.approved == false || request.resource.data.role == 'student' || request.auth.token.email == 'demo.teacher@classtrack.edu' || !exists(/databases/$(database)/documents/users/$(request.auth.uid)));
+      allow update: if isSignedIn() && (
+        (request.auth.uid == userId &&
+         request.resource.data.uid == userId &&
+         request.resource.data.role == resource.data.role &&
+         request.resource.data.approved == resource.data.approved) ||
+        (isApprovedTeacher() &&
+         request.auth.uid != userId &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['approved', 'approvedByUid', 'approvedByName', 'approvedAt', 'updatedAt']) &&
+         request.resource.data.role == resource.data.role &&
+         request.resource.data.uid == resource.data.uid)
+      );
+      allow delete: if isApprovedTeacher() && request.auth.uid != userId;
+    }
+
+    // Classrooms
+    match /classes/{classId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+        request.resource.data.teacherId == request.auth.uid ||
+        isApprovedTeacher()
+      );
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn() && (
+        resource.data.teacherId == request.auth.uid ||
+        isApprovedTeacher()
+      );
+    }
+
+    // Attendance records
+    match /attendance/{attendanceId} {
+      allow read: if isApprovedTeacher() || (isStudent() && resource.data.studentUid == request.auth.uid);
+      allow create: if isApprovedTeacher() || (isStudent() && request.resource.data.studentUid == request.auth.uid);
+      allow update: if isApprovedTeacher();
+      allow delete: if isApprovedTeacher();
+    }
+
+    // Announcements
+    match /announcements/{announcementId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+        request.resource.data.authorUid == request.auth.uid ||
+        request.resource.data.authorId == request.auth.uid ||
+        isApprovedTeacher()
+      );
+      allow update: if isSignedIn() && (
+        resource.data.authorUid == request.auth.uid ||
+        isApprovedTeacher()
+      );
+      allow delete: if isSignedIn() && (
+        resource.data.authorUid == request.auth.uid ||
+        isApprovedTeacher()
+      );
+    }
+
+    // Announcement comments
+    match /comments/{commentId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.authorUid == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.authorUid == request.auth.uid;
+      allow delete: if isSignedIn();
+    }
+
+    // Assignments
+    match /assignments/{assignmentId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+        request.resource.data.teacherId == request.auth.uid ||
+        isApprovedTeacher()
+      );
+      allow update: if isSignedIn() && (
+        resource.data.teacherId == request.auth.uid ||
+        isApprovedTeacher()
+      );
+      allow delete: if isSignedIn() && (
+        resource.data.teacherId == request.auth.uid ||
+        isApprovedTeacher()
+      );
+    }
+
+    // Submissions
+    match /submissions/{submissionId} {
+      allow read: if isSignedIn() && (
+        resource.data.studentUid == request.auth.uid ||
+        isApprovedTeacher()
+      );
+      allow create: if isSignedIn() && (
+        request.resource.data.studentUid == request.auth.uid ||
+        isApprovedTeacher()
+      );
+      allow update: if isSignedIn() && (
+        (request.resource.data.studentUid == request.auth.uid &&
+         resource.data.studentUid == request.auth.uid &&
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['grade', 'feedback', 'gradedAt', 'gradedByUid', 'gradedByName'])) ||
+        isApprovedTeacher()
+      );
+      allow delete: if isApprovedTeacher() || (
+        isSignedIn() &&
+        resource.data.studentUid == request.auth.uid &&
+        !('grade' in resource.data)
+      );
+    }
+
+    // Direct Messages
+    match /direct_messages/{messageId} {
+      allow read: if isSignedIn() && (resource.data.senderUid == request.auth.uid || resource.data.recipientUid == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.senderUid == request.auth.uid;
+      allow update: if isSignedIn() && (resource.data.senderUid == request.auth.uid || resource.data.recipientUid == request.auth.uid);
+      allow delete: if isSignedIn() && resource.data.senderUid == request.auth.uid;
+    }
+
+    // Audit logs (immutable, create-only)
+    match /auditLogs/{logId} {
+      allow read: if isApprovedTeacher();
+      allow create: if isSignedIn() && request.resource.data.userUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+  }
+}

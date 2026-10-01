@@ -1,0 +1,212 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with role, approval status, and personal info",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["teacher", "student"] },
+        "approved": { "type": "boolean" },
+        "studentId": { "type": "string" },
+        "avatar": { "type": "string" },
+        "bio": { "type": "string" },
+        "phone": { "type": "string" },
+        "officeHours": { "type": "string" },
+        "socialLinks": { "type": "object" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "displayName", "role", "approved", "createdAt"]
+    },
+    "Classroom": {
+      "title": "Classroom",
+      "description": "Classroom record created by a teacher",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "section": { "type": "string" },
+        "subject": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "joinCode": { "type": "string" },
+        "studentUids": { "type": "array" },
+        "blockedStudentUids": { "type": "array" },
+        "studentsMap": { "type": "object" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["name", "teacherId", "teacherName", "joinCode", "studentUids", "createdAt"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Daily student attendance log for a classroom",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "date": { "type": "string" },
+        "studentUid": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "status": { "type": "string", "enum": ["present", "absent", "late"] },
+        "markedByUid": { "type": "string" },
+        "markedByName": { "type": "string" },
+        "selfCheckIn": { "type": "boolean" },
+        "overrides": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["classId", "date", "studentUid", "status", "markedByUid", "markedByName", "createdAt", "updatedAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Classroom announcement with targeted audience",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "targetAudience": { "type": "string", "enum": ["all", "students_only", "teachers_only"] },
+        "attachmentUrl": { "type": "string" },
+        "attachmentName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["classId", "title", "content", "authorUid", "authorName", "authorRole", "createdAt"]
+    },
+    "AnnouncementComment": {
+      "title": "AnnouncementComment",
+      "description": "Comment on an announcement, supports public and private types",
+      "type": "object",
+      "properties": {
+        "announcementId": { "type": "string" },
+        "classId": { "type": "string" },
+        "content": { "type": "string" },
+        "commentType": { "type": "string", "enum": ["public", "private"] },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["announcementId", "classId", "content", "authorUid", "authorName", "authorRole", "createdAt"]
+    },
+    "Assignment": {
+      "title": "Assignment",
+      "description": "Assignment created by teacher with attachments and due dates",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "title": { "type": "string" },
+        "instructions": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "maxPoints": { "type": "number" },
+        "attachmentUrl": { "type": "string" },
+        "attachmentName": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["classId", "title", "instructions", "dueDate", "maxPoints", "createdAt"]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "Student work submission with attachments and late detection",
+      "type": "object",
+      "properties": {
+        "assignmentId": { "type": "string" },
+        "classId": { "type": "string" },
+        "studentUid": { "type": "string" },
+        "studentName": { "type": "string" },
+        "studentId": { "type": "string" },
+        "content": { "type": "string" },
+        "attachmentUrl": { "type": "string" },
+        "attachmentName": { "type": "string" },
+        "submittedAt": { "type": "string" },
+        "isLate": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["submitted", "graded"] },
+        "score": { "type": "number" },
+        "feedback": { "type": "string" },
+        "gradedAt": { "type": "string" },
+        "gradedByName": { "type": "string" },
+        "gradedByUid": { "type": "string" }
+      },
+      "required": ["assignmentId", "classId", "studentUid", "studentName", "submittedAt", "status"]
+    },
+    "DirectMessage": {
+      "title": "DirectMessage",
+      "description": "1-on-1 direct message between verified users",
+      "type": "object",
+      "properties": {
+        "senderUid": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string" },
+        "recipientUid": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "recipientRole": { "type": "string" },
+        "message": { "type": "string" },
+        "attachmentUrl": { "type": "string" },
+        "attachmentName": { "type": "string" },
+        "read": { "type": "boolean" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["senderUid", "senderName", "recipientUid", "recipientName", "message", "timestamp"]
+    },
+    "AuditLogEntry": {
+      "title": "AuditLogEntry",
+      "description": "Immutable security and activity audit entry",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "string" },
+        "userUid": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "classId": { "type": "string" }
+      },
+      "required": ["timestamp", "userUid", "userName", "userRole", "action", "details"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profiles and credentials"
+    },
+    "/classes/{classId}": {
+      "schema": { "$ref": "#/entities/Classroom" },
+      "description": "Classrooms and rosters"
+    },
+    "/attendance/{attendanceId}": {
+      "schema": { "$ref": "#/entities/AttendanceRecord" },
+      "description": "Daily student attendance tracking"
+    },
+    "/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "Class announcements"
+    },
+    "/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/AnnouncementComment" },
+      "description": "Discussion and private feedback comments"
+    },
+    "/assignments/{assignmentId}": {
+      "schema": { "$ref": "#/entities/Assignment" },
+      "description": "Course assignments and tasks"
+    },
+    "/submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/Submission" },
+      "description": "Student assignment submissions and grades"
+    },
+    "/direct_messages/{messageId}": {
+      "schema": { "$ref": "#/entities/DirectMessage" },
+      "description": "Peer and teacher-student direct messages"
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLogEntry" },
+      "description": "System security audit log"
+    }
+  }
+}
