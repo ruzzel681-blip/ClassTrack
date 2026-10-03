@@ -1,12 +1,12 @@
 {
-  "projectId": "classtrack-bb48a",
-  "appId": "1:600232546084:web:9964a75a9ad42c90b0adb1",
-  "apiKey": "AIzaSyAs_f4vKwEuLtt9HL7W1Uyvp4wPlQtdgZ0",
-  "authDomain": "classtrack-bb48a.firebaseapp.com",
+  "projectId": "teamcarlclasstrack",
+  "appId": "1:506304809106:web:082cb2f474a77b97a43e4b",
+  "apiKey": "AIzaSyAKYOZ60YWUI3LhiYu_vbNfSaz2ABS5Y2E",
+  "authDomain": "teamcarlclasstrack.firebaseapp.com",
   "firestoreDatabaseId": "",
-  "storageBucket": "classtrack-bb48a.firebasestorage.app",
-  "messagingSenderId": "600232546084",
-  "measurementId": "G-NQ0VFVZM2L",
+  "storageBucket": "teamcarlclasstrack.firebasestorage.app",
+  "messagingSenderId": "506304809106",
+  "measurementId": "",
   "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }
