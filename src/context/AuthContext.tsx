@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
   User,
   onAuthStateChanged,
@@ -42,6 +42,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  // True while a sign-up (or first Google sign-in) is creating the profile.
+  // Firebase signs the person in the instant the Auth account exists, BEFORE the
+  // profile is saved. Without this flag the auth listener below would see "no
+  // profile yet" and create a default approved *student*, overwriting a teacher.
+  const registeringRef = useRef(false);
 
   // Theme state defaulting to 'dark'
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -108,6 +113,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
+      if (firebaseUser && registeringRef.current) {
+        // The sign-up / Google flow is creating the profile itself.
+        return;
+      }
       if (firebaseUser) {
         let p = await fetchProfile(firebaseUser.uid);
         if (!p) {
@@ -165,15 +174,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (role === 'admin') {
       throw new Error('Administrator accounts cannot be registered here.');
     }
+    registeringRef.current = true;
     setLoading(true);
-    let uid = '';
+    let cred: Awaited<ReturnType<typeof createUserWithEmailAndPassword>>;
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email, pass);
-      uid = cred.user.uid;
+      cred = await createUserWithEmailAndPassword(auth, email, pass);
     } catch (err: any) {
+      registeringRef.current = false;
       setLoading(false);
       throw err;
     }
+    const uid = cred.user.uid;
 
     try {
       // Students are active immediately. Teachers always start unapproved and
@@ -201,9 +212,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         `User signed up via email as ${role}. Approval status: ${approved}`
       );
     } catch (err) {
+      // Roll back so the person can simply try again, instead of being left with
+      // a login that has no (or the wrong) profile.
+      try {
+        await cred.user.delete();
+      } catch (_) {
+        try { await firebaseSignOut(auth); } catch (__) {}
+      }
+      setUser(null);
+      setUserProfile(null);
+      registeringRef.current = false;
       setLoading(false);
       throw err;
     }
+    registeringRef.current = false;
     setLoading(false);
   };
 
@@ -252,6 +274,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signInWithGoogle = async (requestedRole: UserRole = 'student', studentId?: string) => {
+    registeringRef.current = true;
     setLoading(true);
     try {
       const res = await signInWithPopup(auth, googleProvider);
@@ -293,6 +316,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
       }
     } catch (err: any) {
+      registeringRef.current = false;
       setLoading(false);
       if (err.code === 'auth/unauthorized-domain') {
         throw new Error(
@@ -301,6 +325,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       throw err;
     }
+    registeringRef.current = false;
     setLoading(false);
   };
 
