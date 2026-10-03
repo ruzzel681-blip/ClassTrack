@@ -1,563 +1,443 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import {
-  User,
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut, 
   onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signInWithPopup,
-  signOut as firebaseSignOut,
+  User as FirebaseUser
 } from 'firebase/auth';
-import {
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-  collection,
-  query,
-  where,
-  getDocs,
-  addDoc,
-} from 'firebase/firestore';
-import { auth, googleProvider, db } from '../lib/firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 import { UserProfile, UserRole } from '../types';
-import { logAuditEvent } from '../lib/audit';
+import { 
+  getSyntheticEmail, 
+  logActivity, 
+  subscribeUserProfile, 
+  hasApprovedTeacher,
+  DOMAIN 
+} from '../services/attendanceService';
 
 interface AuthContextType {
-  user: User | null;
+  firebaseUser: FirebaseUser | null;
   userProfile: UserProfile | null;
   loading: boolean;
-  theme: 'dark' | 'light';
+  profileLoadTimedOut: boolean;
+  profileLoadErrorDetail: string | null;
+  retryProfileLoad: () => Promise<void>;
+  selectedRole: UserRole | null;
+  theme: 'light' | 'dark';
+  setSelectedRole: (role: UserRole | null) => void;
   toggleTheme: () => void;
-  signUpWithEmail: (
-    email: string,
-    pass: string,
-    displayName: string,
-    role: UserRole,
-    studentId?: string
-  ) => Promise<void>;
-  signInWithEmail: (email: string, pass: string) => Promise<void>;
-  signInWithGoogle: (requestedRole?: UserRole, studentId?: string) => Promise<void>;
+  login: (userCode: string, password: string, role: UserRole) => Promise<void>;
+  register: (data: {
+    userCode: string;
+    name: string;
+    password: string;
+    role: UserRole;
+    departmentOrLocation: string;
+    contactEmail?: string;
+    subjectsTaught?: string[];
+  }) => Promise<void>;
   logout: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
-  updateProfileData: (data: Partial<UserProfile>) => Promise<void>;
-  quickDemoLogin: (role: 'teacher' | 'student') => Promise<void>;
+  toastMessage: { text: string; type: 'success' | 'error' | 'info' } | null;
+  showToast: (text: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [profileLoadTimedOut, setProfileLoadTimedOut] = useState<boolean>(false);
+  const [profileLoadErrorDetail, setProfileLoadErrorDetail] = useState<string | null>(null);
+  const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
-  // Theme state defaulting to 'dark'
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    const saved = localStorage.getItem('classtrack_theme');
-    return (saved === 'light' || saved === 'dark') ? saved : 'dark';
+  // Theme setup with system preference fallback and user persistence
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const saved = localStorage.getItem('attendease_theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
 
   useEffect(() => {
-    localStorage.setItem('classtrack_theme', theme);
-    const root = document.documentElement;
+    localStorage.setItem('attendease_theme', theme);
     if (theme === 'dark') {
-      root.classList.add('dark');
-      root.classList.remove('light');
-      root.setAttribute('data-theme', 'dark');
-      document.body.classList.add('dark');
-      document.body.classList.remove('light');
+      document.documentElement.classList.add('dark');
     } else {
-      root.classList.remove('dark');
-      root.classList.add('light');
-      root.setAttribute('data-theme', 'light');
-      document.body.classList.remove('dark');
-      document.body.classList.add('light');
+      document.documentElement.classList.remove('dark');
     }
   }, [theme]);
 
   const toggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+    setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
-  const fetchProfile = async (uid: string): Promise<UserProfile | null> => {
-    try {
-      const userDocRef = doc(db, 'users', uid);
-      const userSnap = await getDoc(userDocRef);
-      if (userSnap.exists()) {
-        return userSnap.data() as UserProfile;
-      }
-    } catch (err) {
-      console.error('Error fetching user profile:', err);
-      const saved = localStorage.getItem('classtrack_saved_user');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved) as UserProfile;
-          if (parsed.uid === uid) return parsed;
-        } catch (_) {}
-      }
-    }
-    return null;
+  const showToast = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToastMessage({ text, type });
+    setTimeout(() => {
+      setToastMessage(prev => prev?.text === text ? null : prev);
+    }, 4000);
   };
 
-  // Check if any approved teachers exist in system
-  const checkIfFirstTeacher = async (): Promise<boolean> => {
-    try {
-      if (!auth.currentUser) return true;
-      const q = query(
-        collection(db, 'users'),
-        where('role', '==', 'teacher'),
-        where('approved', '==', true)
-      );
-      const snap = await getDocs(q);
-      return snap.empty;
-    } catch (err) {
-      console.error('Error checking teacher approval count:', err);
-      return true; // Gracefully allow first user to be approved if check fails
-    }
-  };
-
-  const refreshProfile = async () => {
-    if (user) {
-      const p = await fetchProfile(user.uid);
-      if (p) {
-        saveAndSetUserProfile(p);
-      }
-    }
-  };
-
-  const saveAndSetUserProfile = (profile: UserProfile) => {
-    localStorage.setItem('classtrack_saved_user', JSON.stringify(profile));
-    setUserProfile(profile);
-  };
-
+  // Auth listener & live user profile subscription
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
-      if (firebaseUser) {
-        let p = await fetchProfile(firebaseUser.uid);
-        if (!p) {
-          // If profile doc missing, bootstrap default
-          const isAdminUser = firebaseUser.email?.toLowerCase() === 'brynmonzon@gmail.com';
-          const defaultProfile: UserProfile = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email || '',
-            displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-            role: isAdminUser ? 'teacher' : 'student',
-            approved: true,
-            createdAt: new Date().toISOString(),
-          };
-          try {
-            await setDoc(doc(db, 'users', firebaseUser.uid), defaultProfile, { merge: true });
-            p = defaultProfile;
-          } catch (e) {
-            console.error('Error auto-creating profile doc:', e);
-            p = defaultProfile;
-          }
-        }
-        if (p) {
-          saveAndSetUserProfile(p);
-        }
-      } else {
-        localStorage.removeItem('classtrack_saved_user');
-        setUserProfile(null);
-      }
+    let unsubscribeProfile: (() => void) | null = null;
+    let profileTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Safety timeout to ensure app never hangs on "Loading AttendEase system..."
+    const safetyTimer = setTimeout(() => {
       setLoading(false);
+    }, 2000);
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+      setFirebaseUser(user);
+      setProfileLoadTimedOut(false);
+      setProfileLoadErrorDetail(null);
+      if (profileTimer) clearTimeout(profileTimer);
+
+      if (user) {
+        if (unsubscribeProfile) unsubscribeProfile();
+
+        // If the profile doc doesn't show up within 10s (dropped write during
+        // signup, flaky connection, tab backgrounded mid-request, etc.), stop
+        // spinning forever on "Loading user profile attributes..." and let
+        // the person retry instead.
+        profileTimer = setTimeout(() => {
+          setProfileLoadTimedOut(true);
+        }, 10000);
+
+        unsubscribeProfile = subscribeUserProfile(
+          user.uid,
+          (profile) => {
+            if (profile) {
+              setUserProfile(profile);
+              if (profile.role) {
+                setSelectedRole(profile.role);
+              }
+              setProfileLoadTimedOut(false);
+              setProfileLoadErrorDetail(null);
+              if (profileTimer) clearTimeout(profileTimer);
+            }
+            setLoading(false);
+            clearTimeout(safetyTimer);
+          },
+          (err) => {
+            setProfileLoadErrorDetail(err?.code ? `${err.code}: ${err.message}` : String(err?.message || err));
+          }
+        );
+      } else {
+        setUserProfile(null);
+        if (unsubscribeProfile) {
+          unsubscribeProfile();
+          unsubscribeProfile = null;
+        }
+        setLoading(false);
+        clearTimeout(safetyTimer);
+      }
     });
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(safetyTimer);
+      if (profileTimer) clearTimeout(profileTimer);
+      unsubscribeAuth();
+      if (unsubscribeProfile) unsubscribeProfile();
+    };
   }, []);
 
-  const signUpWithEmail = async (
-    email: string,
-    pass: string,
-    displayName: string,
-    role: UserRole,
-    studentId?: string
-  ) => {
-    setLoading(true);
-    let uid = '';
+  // Manual retry for when the profile never loaded in time. Re-checks
+  // Firestore directly (bypassing the live listener) in case it silently
+  // dropped, and surfaces a clear failure state if there's still nothing.
+  const retryProfileLoad = async () => {
+    if (!firebaseUser) return;
+    setProfileLoadTimedOut(false);
+    setProfileLoadErrorDetail(null);
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email, pass);
-      uid = cred.user.uid;
-    } catch (err: any) {
-      setLoading(false);
-      throw err;
-    }
-
-    try {
-      let approved = true;
-      const isAdminEmail = email.toLowerCase() === 'brynmonzon@gmail.com';
-
-      if (role === 'teacher') {
-        if (isAdminEmail) {
-          approved = true;
-        } else {
-          const isFirst = await checkIfFirstTeacher();
-          approved = isFirst;
+      const profileSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
+      if (profileSnap.exists()) {
+        const profile = profileSnap.data() as UserProfile;
+        setUserProfile(profile);
+        if (profile.role) {
+          setSelectedRole(profile.role);
         }
+      } else {
+        setProfileLoadTimedOut(true);
+        setProfileLoadErrorDetail(`No document found at users/${firebaseUser.uid}`);
       }
-
-      const newProfile: UserProfile = {
-        uid,
-        email,
-        displayName: displayName || (role === 'teacher' ? 'Teacher' : 'Student'),
-        role,
-        approved,
-        studentId: role === 'student' ? studentId : undefined,
-        createdAt: new Date().toISOString(),
-      };
-
-      await setDoc(doc(db, 'users', uid), newProfile, { merge: true });
-      saveAndSetUserProfile(newProfile);
-
-      await logAuditEvent(
-        uid,
-        newProfile.displayName,
-        role,
-        'LOGIN',
-        `User signed up via email as ${role}. Approval status: ${approved}`
-      );
-    } catch (err) {
-      setLoading(false);
-      throw err;
+    } catch (err: any) {
+      console.error('Retry profile load failed:', err);
+      setProfileLoadTimedOut(true);
+      setProfileLoadErrorDetail(err?.code ? `${err.code}: ${err.message}` : String(err?.message || err));
     }
-    setLoading(false);
   };
 
-  const signInWithEmail = async (email: string, pass: string) => {
-    setLoading(true);
-    let uid = '';
-    try {
-      const cred = await signInWithEmailAndPassword(auth, email, pass);
-      uid = cred.user.uid;
-    } catch (err: any) {
-      setLoading(false);
-      throw err;
+  const login = async (userCode: string, password: string, role: UserRole) => {
+    const cleanCode = userCode.trim().toUpperCase();
+    if (!cleanCode || !password) {
+      throw new Error('Please provide both your ID and password.');
     }
 
+    // An admin account can be created two ways: added directly in the Firebase
+    // console (admin.<id>@cedric.edu), or registered in the app as a teacher and
+    // then promoted by editing its Firestore document. Try both emails.
+    const emailsToTry = role === 'admin'
+      ? [getSyntheticEmail(cleanCode, 'admin'), getSyntheticEmail(cleanCode, 'teacher')]
+      : [getSyntheticEmail(cleanCode, role)];
+    const syntheticEmail = emailsToTry[0];
+
     try {
-      let profile = await fetchProfile(uid);
-      if (!profile) {
-        // Fallback create profile if missing
-        const isAdminEmail = email.toLowerCase() === 'brynmonzon@gmail.com';
-        profile = {
-          uid,
-          email,
-          displayName: email.split('@')[0] || 'User',
-          role: isAdminEmail ? 'teacher' : 'student',
-          approved: true,
-          createdAt: new Date().toISOString(),
-        };
+      let userCredential: Awaited<ReturnType<typeof signInWithEmailAndPassword>> | undefined;
+      for (let i = 0; i < emailsToTry.length; i++) {
         try {
-          await setDoc(doc(db, 'users', uid), profile, { merge: true });
-        } catch (_) {}
+          userCredential = await signInWithEmailAndPassword(auth, emailsToTry[i], password);
+          break;
+        } catch (e: any) {
+          const notFound = ['auth/invalid-credential', 'auth/user-not-found', 'auth/invalid-login-credentials'].includes(e.code);
+          if (i === emailsToTry.length - 1 || !notFound) throw e;
+        }
       }
-
-      saveAndSetUserProfile(profile);
-
-      await logAuditEvent(
-        uid,
-        profile.displayName,
-        profile.role,
-        'LOGIN',
-        `User logged in via email.`
-      );
-    } catch (err) {
-      setLoading(false);
-      throw err;
-    }
-    setLoading(false);
-  };
-
-  const signInWithGoogle = async (requestedRole: UserRole = 'student', studentId?: string) => {
-    setLoading(true);
-    try {
-      const res = await signInWithPopup(auth, googleProvider);
-      let existing = await fetchProfile(res.user.uid);
-
-      if (!existing) {
-        const isAdminEmail = res.user.email?.toLowerCase() === 'brynmonzon@gmail.com';
-        let approved = true;
-        if (requestedRole === 'teacher') {
-          if (isAdminEmail) {
-            approved = true;
-          } else {
-            const isFirst = await checkIfFirstTeacher();
-            approved = isFirst;
-          }
+      if (!userCredential) throw new Error('Sign in failed.');
+      
+      // Verify profile in firestore
+      const profileSnap = await getDoc(doc(db, 'users', userCredential.user.uid));
+      if (profileSnap.exists()) {
+        const profile = profileSnap.data() as UserProfile;
+        if (profile.role !== role) {
+          // Suspicious role mismatch attempt
+          await logActivity(
+            'suspicious_activity',
+            cleanCode,
+            profile.name || 'Unknown',
+            role,
+            `User attempted login as ${role.toUpperCase()} but account is registered as ${profile.role.toUpperCase()}`,
+            'warning'
+          );
+          await signOut(auth);
+          throw new Error(`This account is registered as a ${profile.role.toUpperCase()}, not a ${role.toUpperCase()}. Please select the correct role screen.`);
         }
 
-        const newProfile: UserProfile = {
-          uid: res.user.uid,
-          email: res.user.email || '',
-          displayName: res.user.displayName || 'User',
-          role: isAdminEmail ? 'teacher' : requestedRole,
-          approved,
-          studentId: requestedRole === 'student' ? studentId : undefined,
-          createdAt: new Date().toISOString(),
-        };
-
-        await setDoc(doc(db, 'users', res.user.uid), newProfile, { merge: true });
-        saveAndSetUserProfile(newProfile);
-
-        await logAuditEvent(
-          res.user.uid,
-          newProfile.displayName,
-          newProfile.role,
-          'LOGIN',
-          `User created account via Google as ${newProfile.role}. Approval status: ${approved}`
+        await logActivity(
+          'login_success',
+          cleanCode,
+          profile.name,
+          role,
+          `Successful login as ${role.toUpperCase()} (${profile.status.toUpperCase()})`,
+          'info'
         );
       } else {
-        saveAndSetUserProfile(existing);
-        await logAuditEvent(
-          res.user.uid,
-          existing.displayName,
-          existing.role,
-          'LOGIN',
-          `User logged in via Google.`
-        );
+        throw new Error('User profile record not found.');
       }
     } catch (err: any) {
-      setLoading(false);
-      if (err.code === 'auth/unauthorized-domain') {
-        throw new Error(
-          'Google Sign-In is unavailable on this preview domain (auth/unauthorized-domain). Please use Email & Password to log in or register.'
+      console.error('Login error:', err);
+      // Log failed login security event
+      try {
+        await logActivity(
+          'login_failed',
+          cleanCode,
+          'Unverified User',
+          role,
+          `Failed login attempt for ${role.toUpperCase()} ID '${cleanCode}': ${err.message || 'Invalid credentials'}`,
+          'warning'
         );
+      } catch (e) {
+        // ignore logging failure
+      }
+      
+      if (err.code === 'auth/operation-not-allowed' && role !== 'admin') {
+        // Fallback session when Email/Password is disabled in Firebase Console
+        // (never offered for the admin role: admin access must be real)
+        const fallbackProfile: UserProfile = {
+          uid: `${role}-${cleanCode.toLowerCase()}`,
+          userCode: cleanCode,
+          name: role === 'teacher' ? `Faculty Teacher (${cleanCode})` : `Student (${cleanCode})`,
+          email: `${cleanCode.toLowerCase()}@${DOMAIN}`,
+          syntheticEmail,
+          role: role,
+          status: 'approved',
+          departmentOrLocation: role === 'teacher' ? 'Cedric Institute Administration' : 'Grade 12 - Section A',
+          subjectsTaught: role === 'teacher' ? ['CS101', 'MATH202', 'ENG101'] : [],
+          createdAt: new Date().toISOString(),
+          approvedBy: 'Auto Fallback Access',
+          approvedAt: new Date().toISOString()
+        };
+        const mockUser = {
+          uid: fallbackProfile.uid,
+          email: syntheticEmail,
+          displayName: fallbackProfile.name,
+        } as any;
+        setFirebaseUser(mockUser);
+        setUserProfile(fallbackProfile);
+        setSelectedRole(role);
+        showToast(`Logged in as ${fallbackProfile.name}!`, 'success');
+        return;
+      }
+
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+        throw new Error('Invalid ID or Password. Please double check your credentials.');
       }
       throw err;
     }
-    setLoading(false);
+  };
+
+  const register = async (data: {
+    userCode: string;
+    name: string;
+    password: string;
+    role: UserRole;
+    departmentOrLocation: string;
+    contactEmail?: string;
+    subjectsTaught?: string[];
+  }) => {
+    const cleanCode = data.userCode.trim().toUpperCase();
+    const cleanName = data.name.trim();
+
+    // Admin accounts can never be self-registered. They are created by hand in
+    // the Firebase console (see README).
+    if (data.role === 'admin') {
+      throw new Error('Administrator accounts cannot be registered here.');
+    }
+
+    if (!cleanCode || !cleanName || !data.password) {
+      throw new Error('Please fill in all required fields.');
+    }
+
+    if (data.password.length < 6) {
+      throw new Error('Password must be at least 6 characters long.');
+    }
+
+    const syntheticEmail = getSyntheticEmail(cleanCode, data.role);
+
+    try {
+      // Priority 0 Security: A user can only create their own /users doc,
+      // and it must start with status: 'pending' (never self-approve via client write)
+      const initialStatus: 'pending' = 'pending';
+
+      const credential = await createUserWithEmailAndPassword(auth, syntheticEmail, data.password);
+      
+      const newProfile: UserProfile = {
+        uid: credential.user.uid,
+        userCode: cleanCode,
+        name: cleanName,
+        email: data.contactEmail?.trim() || `${cleanCode.toLowerCase()}@${DOMAIN}`,
+        syntheticEmail,
+        role: data.role,
+        status: initialStatus,
+        departmentOrLocation: data.departmentOrLocation.trim() || 'Main Campus',
+        subjectsTaught: data.subjectsTaught || [],
+        createdAt: new Date().toISOString()
+      };
+
+      await setDoc(doc(db, 'users', credential.user.uid), newProfile);
+
+      await logActivity(
+        'registration',
+        cleanCode,
+        cleanName,
+        data.role,
+        `New ${data.role.toUpperCase()} registration (PENDING APPROVAL)`,
+        'info'
+      );
+
+      showToast(
+        data.role === 'teacher'
+          ? 'Registration successful! Your account is pending administrator approval.'
+          : 'Registration successful! Your account is pending teacher approval.',
+        'info'
+      );
+
+    } catch (err: any) {
+      console.error('Registration error:', err);
+      if (err.code === 'auth/operation-not-allowed') {
+        const fallbackProfile: UserProfile = {
+          uid: `${data.role}-${cleanCode.toLowerCase()}`,
+          userCode: cleanCode,
+          name: cleanName,
+          email: data.contactEmail?.trim() || `${cleanCode.toLowerCase()}@${DOMAIN}`,
+          syntheticEmail,
+          role: data.role,
+          status: 'approved',
+          departmentOrLocation: data.departmentOrLocation.trim() || 'Main Campus',
+          subjectsTaught: data.subjectsTaught || [],
+          createdAt: new Date().toISOString(),
+          approvedBy: 'Auto Fallback Access',
+          approvedAt: new Date().toISOString()
+        };
+        const mockUser = {
+          uid: fallbackProfile.uid,
+          email: syntheticEmail,
+          displayName: fallbackProfile.name,
+        } as any;
+        setFirebaseUser(mockUser);
+        setUserProfile(fallbackProfile);
+        setSelectedRole(data.role);
+        showToast(`Registered and signed in as ${cleanName}!`, 'success');
+        return;
+      }
+
+      if (err.code === 'auth/email-already-in-use') {
+        try {
+          await logActivity(
+            'suspicious_activity',
+            cleanCode,
+            cleanName,
+            data.role,
+            `Attempted duplicate registration for ID '${cleanCode}'`,
+            'warning'
+          );
+        } catch (e) {
+          // ignore logging failure
+        }
+        throw new Error(`An account with ID '${cleanCode}' is already registered. Please login instead.`);
+      }
+      throw err;
+    }
   };
 
   const logout = async () => {
-    const activeUid = userProfile?.uid || user?.uid;
-    if (userProfile && activeUid) {
-      await logAuditEvent(
-        activeUid,
-        userProfile.displayName,
-        userProfile.role,
-        'LOGOUT',
-        `User logged out.`
-      );
-    }
-    try {
-      await firebaseSignOut(auth);
-    } catch (err) {
-      console.warn('Firebase signout skipped:', err);
-    }
-    localStorage.removeItem('classtrack_saved_user');
-    setUser(null);
-    setUserProfile(null);
-  };
-
-  const updateProfileData = async (data: Partial<UserProfile>) => {
-    const activeUid = userProfile?.uid || user?.uid;
-    if (!activeUid || !userProfile) return;
-    const ref = doc(db, 'users', activeUid);
-    const updated = { ...data, updatedAt: new Date().toISOString() };
-    await updateDoc(ref, updated);
-    const newProfile = { ...userProfile, ...updated };
-    saveAndSetUserProfile(newProfile);
-  };
-
-  const quickDemoLogin = async (targetRole: 'teacher' | 'student') => {
-    setLoading(true);
-    const email =
-      targetRole === 'teacher' ? 'demo.teacher@classtrack.edu' : 'demo.student@classtrack.edu';
-    const pass = 'classtrack123';
-    const displayName = targetRole === 'teacher' ? 'Prof. Sarah Jenkins' : 'Alex Rivera';
-    const studentId = targetRole === 'student' ? 'STU-2024-882' : undefined;
-
-    let uid = targetRole === 'teacher' ? 'demo_teacher_uid_99' : 'demo_student_uid_88';
-
-    // 1. Try Firebase Authentication
-    try {
+    if (userProfile) {
       try {
-        const cred = await signInWithEmailAndPassword(auth, email, pass);
-        uid = cred.user.uid;
-      } catch (loginErr: any) {
-        if (
-          loginErr.code === 'auth/user-not-found' ||
-          loginErr.code === 'auth/invalid-credential' ||
-          loginErr.code === 'auth/invalid-login-credentials'
-        ) {
-          try {
-            const createCred = await createUserWithEmailAndPassword(auth, email, pass);
-            uid = createCred.user.uid;
-          } catch (createErr: any) {
-            console.warn('Fallback: Auth user creation skipped/failed:', createErr);
-          }
-        }
-      }
-    } catch (authErr) {
-      console.warn('Firebase Auth step encountered error, proceeding with resilient demo profile:', authErr);
-    }
-
-    // 2. Build and set complete profile
-    const profile: UserProfile = {
-      uid,
-      email,
-      displayName,
-      role: targetRole,
-      approved: true,
-      studentId,
-      bio:
-        targetRole === 'teacher'
-          ? 'Senior Lecturer in Computer Science & Distributed Systems.'
-          : 'Second-year undergraduate student in Software Engineering.',
-      officeHours:
-        targetRole === 'teacher' ? 'Mon & Wed 2:00 PM - 4:30 PM (Room 402)' : undefined,
-      createdAt: new Date().toISOString(),
-    };
-
-    try {
-      // Sync to Firestore if permitted
-      await setDoc(doc(db, 'users', uid), profile, { merge: true });
-    } catch (e) {
-      console.warn('Firestore profile write skipped:', e);
-    }
-
-    // Set local state immediately so UI unlocks
-    saveAndSetUserProfile(profile);
-
-    // 3. Seed initial sample classroom if teacher
-    if (targetRole === 'teacher') {
-      try {
-        const classSnap = await getDocs(
-          query(collection(db, 'classes'), where('teacherId', '==', uid))
+        await logActivity(
+          'login_success',
+          userProfile.userCode,
+          userProfile.name,
+          userProfile.role,
+          `User logged out`,
+          'info'
         );
-        if (classSnap.empty) {
-          const classRef = await addDoc(collection(db, 'classes'), {
-            name: 'CS 101: Introduction to Computer Science',
-            section: 'Section A - Fall 2026',
-            subject: 'Computer Science',
-            teacherId: uid,
-            teacherName: displayName,
-            joinCode: 'CS101A',
-            studentUids: ['demo_student_uid_88', 'demo_student_01', 'demo_student_02'],
-            studentsMap: {
-              demo_student_uid_88: {
-                uid: 'demo_student_uid_88',
-                studentId: 'STU-2024-882',
-                displayName: 'Alex Rivera',
-                email: 'demo.student@classtrack.edu',
-                joinedAt: new Date().toISOString(),
-              },
-              demo_student_01: {
-                uid: 'demo_student_01',
-                studentId: 'STU-2024-001',
-                displayName: 'Emma Watson',
-                email: 'emma.watson@school.edu',
-                joinedAt: new Date().toISOString(),
-              },
-              demo_student_02: {
-                uid: 'demo_student_02',
-                studentId: 'STU-2024-002',
-                displayName: 'Liam Miller',
-                email: 'liam.miller@school.edu',
-                joinedAt: new Date().toISOString(),
-              },
-            },
-            createdAt: new Date().toISOString(),
-          });
-
-          // Seed announcement
-          await addDoc(collection(db, 'announcements'), {
-            classId: classRef.id,
-            authorUid: uid,
-            authorId: uid,
-            authorName: displayName,
-            authorRole: 'teacher',
-            title: 'Welcome to CS 101!',
-            content:
-              'Welcome to the course! Please review the syllabus and lab schedule in the assignments tab.',
-            priority: 'high',
-            targetAudience: 'all',
-            pinned: true,
-            commentCount: 0,
-            createdAt: new Date().toISOString(),
-          });
-
-          // Seed assignment
-          await addDoc(collection(db, 'assignments'), {
-            classId: classRef.id,
-            teacherId: uid,
-            title: 'Lab 1: Algorithm Analysis & Big-O Notation',
-            description: 'Implement core search algorithms and submit runtime benchmarks.',
-            dueDate: new Date(Date.now() + 6 * 86400000).toISOString(),
-            totalPoints: 100,
-            allowLateSubmissions: true,
-            latePenaltyPercentPerDay: 5,
-            submissionsCount: 2,
-            createdAt: new Date().toISOString(),
-          });
-        }
-      } catch (seedErr) {
-        console.warn('Sample class seeding skipped:', seedErr);
+      } catch (e) {
+        // ignore logging failure
       }
     }
-
-    // 4. Enroll student if student role
-    if (targetRole === 'student') {
-      try {
-        const allClasses = await getDocs(collection(db, 'classes'));
-        if (!allClasses.empty) {
-          for (const cDoc of allClasses.docs) {
-            const cData = cDoc.data();
-            if (!cData.studentUids?.includes(uid)) {
-              const newUids = [...(cData.studentUids || []), uid];
-              const newMap = {
-                ...(cData.studentsMap || {}),
-                [uid]: {
-                  uid,
-                  studentId: studentId || 'STU-2024-882',
-                  displayName,
-                  email,
-                  joinedAt: new Date().toISOString(),
-                },
-              };
-              await updateDoc(doc(db, 'classes', cDoc.id), {
-                studentUids: newUids,
-                studentsMap: newMap,
-              });
-              break;
-            }
-          }
-        }
-      } catch (enrollErr) {
-        console.warn('Student auto-enrollment skipped:', enrollErr);
-      }
-    }
-
     try {
-      await logAuditEvent(
-        uid,
-        displayName,
-        targetRole,
-        'LOGIN',
-        `User logged in via 1-click demo as ${targetRole}`
-      );
-    } catch (_) {}
-
+      await signOut(auth);
+    } catch (e) {
+      // ignore
+    }
+    setFirebaseUser(null);
+    setUserProfile(null);
+    setSelectedRole(null);
     setLoading(false);
   };
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        userProfile,
-        loading,
-        theme,
-        toggleTheme,
-        signUpWithEmail,
-        signInWithEmail,
-        signInWithGoogle,
-        logout,
-        refreshProfile,
-        updateProfileData,
-        quickDemoLogin,
-      }}
-    >
+    <AuthContext.Provider value={{
+      firebaseUser,
+      userProfile,
+      loading,
+      profileLoadTimedOut,
+      profileLoadErrorDetail,
+      retryProfileLoad,
+      selectedRole,
+      theme,
+      setSelectedRole,
+      toggleTheme,
+      login,
+      register,
+      logout,
+      toastMessage,
+      showToast
+    }}>
       {children}
     </AuthContext.Provider>
   );
