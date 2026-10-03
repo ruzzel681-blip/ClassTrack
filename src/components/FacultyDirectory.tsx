@@ -23,73 +23,6 @@ interface FacultyDirectoryProps {
   onStartMessage?: (recipient: UserProfile) => void;
 }
 
-const DEFAULT_FACULTY: UserProfile[] = [
-  {
-    uid: 'teacher_jenkins',
-    email: 'sarah.jenkins@classtrack.edu',
-    displayName: 'Prof. Sarah Jenkins',
-    role: 'teacher',
-    approved: true,
-    department: 'Department of Computer Science',
-    bio: 'Lead Instructor for CS101, Data Structures, and Software Architecture. Office open for all students.',
-    officeHours: 'Mon/Wed 2:00 PM - 4:30 PM (Lab 402)',
-    phone: '+1 (555) 234-8901',
-    socialLinks: {
-      github: 'sarah-jenkins-cs',
-      linkedin: 'sarah-jenkins-edu',
-      website: 'https://classtrack.edu/faculty/jenkins',
-    },
-    createdAt: '2026-01-10T08:00:00.000Z',
-  },
-  {
-    uid: 'teacher_turing',
-    email: 'alan.turing@classtrack.edu',
-    displayName: 'Dr. Alan Turing',
-    role: 'teacher',
-    approved: true,
-    department: 'Computation & Discrete Mathematics',
-    bio: 'Specialist in Automata Theory, Computational Complexity, Cryptography, and Advanced Algorithms.',
-    officeHours: 'Tue/Thu 10:00 AM - 1:00 PM (Math Wing B-12)',
-    phone: '+1 (555) 314-1592',
-    socialLinks: {
-      github: 'alan-turing-math',
-      website: 'https://classtrack.edu/faculty/turing',
-    },
-    createdAt: '2026-01-10T08:00:00.000Z',
-  },
-  {
-    uid: 'teacher_rostova',
-    email: 'elena.rostova@classtrack.edu',
-    displayName: 'Dr. Elena Rostova',
-    role: 'teacher',
-    approved: true,
-    department: 'Artificial Intelligence & Robotics',
-    bio: 'Research lead in Neural Networks, Deep Learning Models, Computer Vision, and Autonomous Embedded Systems.',
-    officeHours: 'Friday 1:00 PM - 5:00 PM (AI Research Lab 3B)',
-    phone: '+1 (555) 789-0123',
-    socialLinks: {
-      github: 'elena-rostova-ai',
-      linkedin: 'elena-rostova-phd',
-    },
-    createdAt: '2026-01-15T09:00:00.000Z',
-  },
-  {
-    uid: 'teacher_vance',
-    email: 'marcus.vance@classtrack.edu',
-    displayName: 'Prof. Marcus Vance',
-    role: 'teacher',
-    approved: true,
-    department: 'Calculus & Applied Physics',
-    bio: 'Differential Equations, Multivariable Calculus, Classical Mechanics, and Applied Engineering Modeling.',
-    officeHours: 'Mon/Fri 9:00 AM - 11:30 AM (Science Hall 201)',
-    phone: '+1 (555) 456-7890',
-    socialLinks: {
-      linkedin: 'marcus-vance-calculus',
-    },
-    createdAt: '2026-02-01T10:00:00.000Z',
-  },
-];
-
 export const FacultyDirectory: React.FC<FacultyDirectoryProps> = ({
   isOpen,
   onClose,
@@ -114,14 +47,14 @@ export const FacultyDirectory: React.FC<FacultyDirectoryProps> = ({
 
   const fetchFaculty = async () => {
     setLoading(true);
-    const list: UserProfile[] = [...DEFAULT_FACULTY];
+    const list: UserProfile[] = [];
 
     try {
       const q = query(collection(db, 'users'), where('role', '==', 'teacher'));
       const snap = await getDocs(q);
       snap.forEach((d) => {
         const u = d.data() as UserProfile;
-        if (u.approved !== false) {
+        if (u.approved === true && !u.revoked) {
           if (!list.some((existing) => existing.uid === u.uid || existing.email === u.email)) {
             list.push(u);
           }
