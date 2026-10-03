@@ -327,7 +327,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     : 'bg-amber-950 text-amber-400 border border-amber-800'
                 }`}
               >
-                {userProfile.approved ? 'Active & Approved' : 'Pending Teacher Approval'}
+                {userProfile.approved ? 'Active & Approved' : 'Pending Admin Approval'}
               </span>
             </div>
           </div>

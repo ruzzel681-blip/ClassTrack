@@ -296,7 +296,7 @@ export const AuthScreen: React.FC = () => {
                   <div className="bg-amber-950/40 border border-amber-800/80 text-amber-300 p-3 rounded-xl text-xs flex items-start gap-2.5 leading-relaxed">
                     <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                     <div>
-                      New teacher accounts require approval from an existing teacher or admin before full teacher permissions are activated.
+                      New teacher accounts must be approved by an administrator before teacher permissions are activated.
                     </div>
                   </div>
                 )}

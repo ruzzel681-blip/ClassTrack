@@ -69,7 +69,7 @@ export const DirectMessagesDrawer: React.FC<DirectMessagesDrawerProps> = ({
         const list: UserProfile[] = [];
         snap.forEach((d) => {
           const u = d.data() as UserProfile;
-          if (u.uid !== userProfile.uid && (u.role === 'student' || u.approved)) {
+          if (u.uid !== userProfile.uid && u.role !== 'admin' && (u.role === 'student' || u.approved)) {
             list.push(u);
           }
         });

@@ -11,13 +11,20 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    // Admin accounts cannot be created from the app. They are set up once, by
+    // hand, in the Firebase console (see README).
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        getUserData().role == 'admin' &&
+        getUserData().approved == true;
+    }
+
     function isApprovedTeacher() {
-      return isSignedIn() && (
-        request.auth.token.email == 'demo.teacher@classtrack.edu' ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         getUserData().role == 'teacher' &&
-         getUserData().approved == true)
-      );
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        getUserData().role == 'teacher' &&
+        getUserData().approved == true;
     }
 
     function isStudent() {
@@ -34,22 +41,44 @@ service cloud.firestore {
     // User profiles
     match /users/{userId} {
       allow read: if isSignedIn();
+
+      // Sign-up: you can only create your OWN profile. Students are active right
+      // away; teachers MUST start unapproved. Nobody can create an admin profile
+      // or pre-set the revoked flag.
       allow create: if isSignedIn() &&
         request.auth.uid == userId &&
         request.resource.data.uid == userId &&
-        (request.resource.data.approved == false || request.resource.data.role == 'student' || request.auth.token.email == 'demo.teacher@classtrack.edu' || !exists(/databases/$(database)/documents/users/$(request.auth.uid)));
+        request.resource.data.get('revoked', false) == false &&
+        (
+          (request.resource.data.role == 'student' && request.resource.data.approved == true) ||
+          (request.resource.data.role == 'teacher' && request.resource.data.approved == false)
+        );
+
       allow update: if isSignedIn() && (
-        (request.auth.uid == userId &&
-         request.resource.data.uid == userId &&
-         request.resource.data.role == resource.data.role &&
-         request.resource.data.approved == resource.data.approved) ||
-        (isApprovedTeacher() &&
-         request.auth.uid != userId &&
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['approved', 'approvedByUid', 'approvedByName', 'approvedAt', 'updatedAt']) &&
-         request.resource.data.role == resource.data.role &&
-         request.resource.data.uid == resource.data.uid)
+        // 1) Your own profile: identity, role and every approval field are locked.
+        (
+          request.auth.uid == userId &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'uid', 'role', 'approved', 'approvedAt', 'approvedByUid', 'approvedByName',
+            'revoked', 'revokedReason', 'revokedAt', 'revokedByUid', 'revokedByName'
+          ])
+        ) ||
+        // 2) Admin: approve, reject, revoke or restore TEACHER accounts.
+        (
+          isAdmin() &&
+          resource.data.role == 'teacher' &&
+          request.resource.data.role == 'teacher' &&
+          request.resource.data.uid == resource.data.uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'approved', 'approvedAt', 'approvedByUid', 'approvedByName',
+            'revoked', 'revokedReason', 'revokedAt', 'revokedByUid', 'revokedByName',
+            'updatedAt'
+          ])
+        )
       );
-      allow delete: if isApprovedTeacher() && request.auth.uid != userId;
+
+      // Only an admin can delete a profile, and never an admin's.
+      allow delete: if isAdmin() && resource.data.role != 'admin';
     }
 
     // Classrooms
@@ -150,7 +179,7 @@ service cloud.firestore {
 
     // Audit logs (immutable, create-only)
     match /auditLogs/{logId} {
-      allow read: if isApprovedTeacher();
+      allow read: if isApprovedTeacher() || isAdmin();
       allow create: if isSignedIn() && request.resource.data.userUid == request.auth.uid;
       allow update, delete: if false;
     }

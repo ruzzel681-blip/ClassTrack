@@ -1,4 +1,4 @@
-export type UserRole = 'teacher' | 'student';
+export type UserRole = 'teacher' | 'student' | 'admin';
 
 export interface SocialLinks {
   github?: string;
@@ -12,7 +12,16 @@ export interface UserProfile {
   email: string;
   displayName: string;
   role: UserRole;
-  approved: boolean; // Teachers require approval before accessing app features
+  approved: boolean; // Teachers require ADMIN approval before accessing app features
+  // Approval / revocation trail (written only by an administrator)
+  approvedAt?: string;
+  approvedByUid?: string;
+  approvedByName?: string;
+  revoked?: boolean; // true = an admin rejected this teacher or revoked their access
+  revokedReason?: string;
+  revokedAt?: string;
+  revokedByUid?: string;
+  revokedByName?: string;
   studentId?: string; // Student ID e.g. STU-1001
   avatar?: string; // Base64 or preset avatar identifier
   bio?: string;
@@ -178,6 +187,8 @@ export type AuditActionType =
   | 'SELF_CHECK_IN'
   | 'TEACHER_APPROVED'
   | 'TEACHER_REJECTED'
+  | 'TEACHER_REVOKED'
+  | 'TEACHER_RESTORED'
   | 'STUDENT_ADDED'
   | 'STUDENT_REMOVED'
   | 'STUDENT_BLOCKED'
