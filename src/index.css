@@ -1,0 +1,191 @@
+@import "tailwindcss";
+
+/* Base Custom Tokens & Fonts */
+:root {
+  color-scheme: dark;
+  --app-bg: #09090b;
+  --app-surface: #121215;
+  --app-card: #18181b;
+  --app-border: #27272a;
+  --app-border-subtle: #1f1f23;
+  --app-text: #fafafa;
+  --app-text-muted: #a1a1aa;
+  --app-text-dim: #71717a;
+  --app-primary: #3b82f6;
+  --app-primary-hover: #2563eb;
+}
+
+html.light,
+html:not(.dark),
+[data-theme="light"] {
+  color-scheme: light;
+  --app-bg: #f8fafc;
+  --app-surface: #ffffff;
+  --app-card: #ffffff;
+  --app-border: #e2e8f0;
+  --app-border-subtle: #f1f5f9;
+  --app-text: #0f172a;
+  --app-text-muted: #475569;
+  --app-text-dim: #64748b;
+  --app-primary: #2563eb;
+  --app-primary-hover: #1d4ed8;
+
+  /* Re-tune zinc tokens specifically for light mode so all dark-first classes translate gracefully */
+  --color-zinc-950: #f8fafc;
+  --color-zinc-900: #ffffff;
+  --color-zinc-850: #f8fafc;
+  --color-zinc-800: #e2e8f0;
+  --color-zinc-700: #cbd5e1;
+  --color-zinc-600: #94a3b8;
+  --color-zinc-500: #64748b;
+  --color-zinc-400: #475569;
+  --color-zinc-300: #334155;
+  --color-zinc-200: #1e293b;
+  --color-zinc-100: #0f172a;
+  --color-zinc-50: #020617;
+
+  /* Accessible High-Contrast Light Colors */
+  --color-blue-950: #eff6ff;
+  --color-blue-900: #dbeafe;
+  --color-blue-800: #bfdbfe;
+  --color-blue-700: #60a5fa;
+  --color-blue-600: #2563eb;
+  --color-blue-500: #1d4ed8;
+  --color-blue-400: #1d4ed8;
+  --color-blue-300: #1e40af;
+  --color-blue-200: #172554;
+
+  --color-sky-950: #f0f9ff;
+  --color-sky-900: #e0f2fe;
+  --color-sky-800: #bae6fd;
+  --color-sky-700: #38bdf8;
+  --color-sky-600: #0284c7;
+  --color-sky-500: #0369a1;
+  --color-sky-400: #0369a1;
+  --color-sky-300: #075985;
+  --color-sky-200: #082f49;
+
+  --color-emerald-950: #f0fdf4;
+  --color-emerald-900: #dcfce7;
+  --color-emerald-800: #bbf7d0;
+  --color-emerald-700: #4ade80;
+  --color-emerald-600: #16a34a;
+  --color-emerald-500: #15803d;
+  --color-emerald-400: #15803d;
+  --color-emerald-300: #166534;
+  --color-emerald-200: #14532d;
+
+  --color-amber-950: #fffbeb;
+  --color-amber-900: #fef3c7;
+  --color-amber-800: #fde68a;
+  --color-amber-700: #f59e0b;
+  --color-amber-600: #d97706;
+  --color-amber-500: #b45309;
+  --color-amber-400: #b45309;
+  --color-amber-300: #92400e;
+  --color-amber-200: #78350f;
+
+  --color-red-950: #fef2f2;
+  --color-red-900: #fee2e2;
+  --color-red-800: #fecaca;
+  --color-red-700: #ef4444;
+  --color-red-600: #dc2626;
+  --color-red-500: #b91c1c;
+  --color-red-400: #b91c1c;
+  --color-red-300: #991b1b;
+  --color-red-200: #7f1d1d;
+
+  --color-indigo-950: #eef2ff;
+  --color-indigo-900: #e0e7ff;
+  --color-indigo-800: #c7d2fe;
+  --color-indigo-600: #4f46e5;
+  --color-indigo-400: #4338ca;
+  --color-indigo-300: #3730a3;
+}
+
+html, body {
+  background-color: var(--app-bg);
+  color: var(--app-text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  max-width: 100vw;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-syne {
+  font-family: 'Syne', sans-serif;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.font-sans {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Background Subtle Dot Pattern */
+.dot-grid-bg {
+  background-image: radial-gradient(circle at 2px 2px, rgba(161, 161, 170, 0.12) 1.5px, transparent 0);
+  background-size: 28px 28px;
+}
+
+html.light .dot-grid-bg,
+html:not(.dark) .dot-grid-bg,
+[data-theme="light"] .dot-grid-bg {
+  background-image: radial-gradient(circle at 2px 2px, rgba(15, 23, 42, 0.08) 1.5px, transparent 0);
+  background-size: 28px 28px;
+}
+
+#root {
+  max-width: 100vw;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background-color: var(--app-bg);
+  transition: background-color 0.15s ease;
+}
+
+/* Modern Minimalist Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+html.light ::-webkit-scrollbar-thumb,
+html:not(.dark) ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+
+html.light ::-webkit-scrollbar-thumb:hover,
+html:not(.dark) ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+}
+
+html.light *,
+html:not(.dark) * {
+  scrollbar-color: #cbd5e1 transparent;
+}

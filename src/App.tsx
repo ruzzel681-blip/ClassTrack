@@ -1,0 +1,267 @@
+import React, { useEffect, useState } from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthScreen } from './components/AuthScreen';
+import { Header } from './components/Header';
+import { Dashboard, MainTabType } from './components/Dashboard';
+import { SettingsModal } from './components/SettingsModal';
+import { AdminConsole } from './components/AdminConsole';
+import { DirectMessagesDrawer } from './components/DirectMessagesDrawer';
+import { FacultyDirectory } from './components/FacultyDirectory';
+import { Classroom, UserProfile } from './types';
+import { collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
+import { db } from './lib/firebase';
+import { ShieldAlert, ShieldX, RefreshCw } from 'lucide-react';
+
+const MainApp: React.FC = () => {
+  const { userProfile, loading, logout, refreshProfile } = useAuth();
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [selectedClassroom, setSelectedClassroom] = useState<Classroom | null>(null);
+  const [loadingClassrooms, setLoadingClassrooms] = useState(true);
+  // The admin can switch between the Admin Console and the normal teacher tools
+  const [adminView, setAdminView] = useState<'console' | 'teaching'>('console');
+  const [activeTab, setActiveTab] = useState<MainTabType>('attendance');
+
+  // Modals & Drawers
+  const [showSettings, setShowSettings] = useState(false);
+  const [showMessagesDrawer, setShowMessagesDrawer] = useState(false);
+  const [showFacultyDirectory, setShowFacultyDirectory] = useState(false);
+  const [activeChatRecipient, setActiveChatRecipient] = useState<UserProfile | null>(null);
+  const [unreadDMsCount, setUnreadDMsCount] = useState(0);
+
+  const fetchClassrooms = async () => {
+    if (!userProfile) return;
+    setLoadingClassrooms(true);
+    const list: Classroom[] = [];
+    try {
+      let q;
+      if (userProfile.role === 'teacher' || userProfile.role === 'admin') {
+        q = query(collection(db, 'classes'), where('teacherId', '==', userProfile.uid));
+      } else {
+        q = query(
+          collection(db, 'classes'),
+          where('studentUids', 'array-contains', userProfile.uid)
+        );
+      }
+
+      const snap = await getDocs(q);
+      snap.forEach((d) => {
+        list.push({ id: d.id, ...(d.data() as object) } as Classroom);
+      });
+    } catch (err) {
+      console.warn('Firestore classrooms query note:', err);
+    }
+
+    // Merge any custom local classes
+    const localRaw = localStorage.getItem('classtrack_custom_classes');
+    if (localRaw) {
+      try {
+        const parsedLocal: Classroom[] = JSON.parse(localRaw);
+        for (const lc of parsedLocal) {
+          if (!list.some((existing) => existing.id === lc.id)) {
+            if (userProfile.role === 'teacher' || userProfile.role === 'admin') {
+              if (lc.teacherId === userProfile.uid || !lc.teacherId) {
+                list.push(lc);
+              }
+            } else {
+              if (lc.studentUids?.includes(userProfile.uid)) {
+                list.push(lc);
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    list.sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
+    setClassrooms(list);
+
+    setSelectedClassroom((prev) => {
+      if (!prev) return list[0] || null;
+      const exists = list.find((c) => c.id === prev.id);
+      return exists || list[0] || null;
+    });
+    setLoadingClassrooms(false);
+  };
+
+  // Listen for unread direct messages
+  useEffect(() => {
+    if (!userProfile) return;
+    try {
+      const q = query(
+        collection(db, 'direct_messages'),
+        where('recipientUid', '==', userProfile.uid),
+        where('read', '==', false)
+      );
+      const unsubscribe = onSnapshot(
+        q,
+        (snap) => {
+          setUnreadDMsCount(snap.size);
+        },
+        (err) => {
+          console.error('Error listening to unread DMs:', err);
+        }
+      );
+      return () => unsubscribe();
+    } catch (err) {
+      console.error('Failed to subscribe to unread DMs:', err);
+    }
+  }, [userProfile]);
+
+  useEffect(() => {
+    fetchClassrooms();
+  }, [userProfile]);
+
+  const handleStartMessage = (recipient: UserProfile) => {
+    setActiveChatRecipient(recipient);
+    setShowMessagesDrawer(true);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-300 font-mono text-xs flex items-center justify-center p-4">
+        <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 px-4 py-3 rounded">
+          <RefreshCw className="w-4 h-4 animate-spin text-sky-400" />
+          <span>Initializing ClassTrack System...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!userProfile) {
+    return <AuthScreen />;
+  }
+
+  // Administrators get their own console (teacher approvals + audit log)
+  if (userProfile.role === 'admin' && adminView === 'console') {
+    return <AdminConsole onSwitchToTeaching={() => setAdminView('teaching')} />;
+  }
+
+  // Teachers can't use the app until an administrator approves them
+  const isTeacher = userProfile.role === 'teacher' || userProfile.role === 'admin';
+  const isRevokedTeacher = isTeacher && !userProfile.approved && !!userProfile.revoked;
+  const isPendingTeacher = isTeacher && !userProfile.approved && !userProfile.revoked;
+
+  return (
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans flex flex-col">
+      <Header
+        onOpenAdminConsole={userProfile.role === 'admin' ? () => setAdminView('console') : undefined}
+        onOpenSettings={() => setShowSettings(true)}
+        classrooms={classrooms}
+        selectedClassroom={selectedClassroom}
+        onSelectClassroom={(c) => setSelectedClassroom(c)}
+        onNavigateToClasses={() => setActiveTab('classes')}
+        onOpenMessages={() => setShowMessagesDrawer(true)}
+        unreadMessagesCount={unreadDMsCount}
+        onOpenFacultyDirectory={() => setShowFacultyDirectory(true)}
+      />
+
+      {isRevokedTeacher ? (
+        <main className="flex-1 max-w-xl mx-auto px-4 py-16 text-center font-mono">
+          <div className="bg-zinc-900 border border-red-900/80 rounded-lg p-8 text-zinc-200">
+            <ShieldX className="w-10 h-10 text-red-400 mx-auto mb-4" />
+            <h2 className="text-lg font-bold uppercase tracking-tight text-red-300 mb-2">
+              Teacher Access Unavailable
+            </h2>
+            <p className="text-xs text-zinc-300 leading-relaxed mb-4">
+              An administrator has not approved your teacher account, or has revoked your access.
+            </p>
+            {userProfile.revokedReason && (
+              <p className="text-xs text-red-300/90 bg-red-950/40 border border-red-900/60 rounded p-2.5 mb-6">
+                Reason: {userProfile.revokedReason}
+              </p>
+            )}
+            <div className="flex flex-wrap items-center justify-center gap-3 text-xs">
+              <button
+                onClick={refreshProfile}
+                className="px-4 py-2 rounded bg-zinc-800 border border-zinc-700 text-zinc-200 font-medium hover:bg-zinc-700 transition-colors cursor-pointer"
+              >
+                Check Status
+              </button>
+              <button
+                onClick={logout}
+                className="px-4 py-2 rounded border border-zinc-700 text-zinc-400 hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
+        </main>
+      ) : isPendingTeacher ? (
+        <main className="flex-1 max-w-xl mx-auto px-4 py-16 text-center font-mono">
+          <div className="bg-zinc-900 border border-amber-900/80 rounded-lg p-8 text-zinc-200">
+            <ShieldAlert className="w-10 h-10 text-amber-400 mx-auto mb-4" />
+            <h2 className="text-lg font-bold uppercase tracking-tight text-amber-300 mb-2">
+              Teacher Account Pending Approval
+            </h2>
+            <p className="text-xs text-zinc-300 leading-relaxed mb-6">
+              Your teacher account is waiting for an administrator to approve it. This page updates automatically as soon as
+              you are approved, and full classroom management and attendance access will be granted.
+            </p>
+
+            <div className="flex flex-wrap items-center justify-center gap-3 text-xs">
+              <button
+                onClick={refreshProfile}
+                className="px-4 py-2 rounded bg-amber-950 border border-amber-800 text-amber-200 font-medium hover:bg-amber-900 transition-colors cursor-pointer"
+              >
+                Check Approval Status
+              </button>
+              <button
+                onClick={logout}
+                className="px-4 py-2 rounded border border-zinc-700 text-zinc-400 hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
+        </main>
+      ) : (
+        <main className="flex-1">
+          <Dashboard
+            selectedClassroom={selectedClassroom}
+            setSelectedClassroom={setSelectedClassroom}
+            classrooms={classrooms}
+            loadingClassrooms={loadingClassrooms}
+            refreshClassrooms={fetchClassrooms}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            onStartMessage={handleStartMessage}
+          />
+        </main>
+      )}
+
+      {/* Footer */}
+      <footer className="border-t border-zinc-900 bg-zinc-950 py-4 px-6 text-center font-mono text-[11px] text-zinc-500">
+        ClassTrack • Internal Attendance & Classroom Management Tool
+      </footer>
+
+      {/* Modals & Drawers */}
+      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
+
+      <DirectMessagesDrawer
+        isOpen={showMessagesDrawer}
+        onClose={() => {
+          setShowMessagesDrawer(false);
+          setActiveChatRecipient(null);
+        }}
+        initialRecipient={activeChatRecipient}
+      />
+
+      <FacultyDirectory
+        isOpen={showFacultyDirectory}
+        onClose={() => setShowFacultyDirectory(false)}
+        onStartMessage={handleStartMessage}
+      />
+    </div>
+  );
+};
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <MainApp />
+    </AuthProvider>
+  );
+}
+
